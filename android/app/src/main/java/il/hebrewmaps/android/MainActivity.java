@@ -3,42 +3,42 @@ package il.hebrewmaps.android;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
-import android.text.InputType;
 import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
-import android.view.inputmethod.EditorInfo;
 import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
-import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 /**
- * A thin Android shell around the Hebrew Maps web app: the maps server (the Windows program, or any
- * server running hmaps) is entered once and then shown full screen in a WebView.
+ * Hebrew Maps for Android: the Python server (hmaps) runs inside the app on 127.0.0.1 and the web UI is
+ * shown in a WebView. Map data is downloaded from the app itself (menu -> updates) into the app's storage.
  */
 public class MainActivity extends Activity {
-    private static final String PREFS = "hmaps";
-    private static final String KEY_URL = "server";
+    private static final int PORT = 8080;
+    private static final String BASE = "http://127.0.0.1:" + PORT;
     private static final int REQ_LOCATION = 1;
 
     private WebView web;
-    private View setup;
-    private EditText input;
-    private TextView error;
+    private TextView status;
     private GeolocationPermissions.Callback pendingGeo;
     private String pendingGeoOrigin;
 
@@ -48,33 +48,82 @@ public class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         web = buildWebView();
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        TextView gear = new TextView(this);
-        gear.setText(R.string.settings);
-        gear.setTextSize(20);
-        gear.setTextColor(Color.WHITE);
-        gear.setBackgroundColor(0x99000000);
-        gear.setPadding(24, 8, 24, 8);
-        gear.setOnClickListener(v -> showSetup(null));
-        FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT);
-        gp.setMargins(16, 0, 0, 160);
-        root.addView(gear, gp);
-
-        setup = buildSetup();
-        root.addView(setup, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        status = new TextView(this);
+        status.setText("מפות ישראל נטענת…");
+        status.setTextSize(20);
+        status.setGravity(Gravity.CENTER);
+        status.setBackgroundColor(0xFFFFFFFF);
+        root.addView(status, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        new Thread(this::boot, "hmaps-boot").start();
+    }
 
-        String saved = prefs().getString(KEY_URL, "");
-        if (saved.isEmpty()) {
-            showSetup(null);
-        } else {
-            setup.setVisibility(View.GONE);
-            web.loadUrl(saved);
+    private void boot() {
+        try {
+            File webDir = new File(getFilesDir(), "web");
+            File stamp = new File(getFilesDir(), "web.version");
+            String ver = String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime);
+            if (!stamp.exists() || !ver.equals(readText(stamp))) {
+                deleteTree(webDir);
+                copyAssets("web", getFilesDir());
+                writeText(stamp, ver);
+            }
+            if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
+            PyObject m = Python.getInstance().getModule("android_main");
+            m.callAttr("start", new File(getExternalFilesDir(null) != null ? getExternalFilesDir(null) : getFilesDir(), "data").getAbsolutePath(),
+                    webDir.getAbsolutePath(), PORT);
+            for (int i = 0; i < 120; i++) {
+                if (healthy()) {
+                    runOnUiThread(() -> { status.setVisibility(android.view.View.GONE); web.loadUrl(BASE + "/map.html"); });
+                    return;
+                }
+                Thread.sleep(500);
+            }
+            runOnUiThread(() -> status.setText("השרת לא עלה. נסו לפתוח את האפליקציה מחדש."));
+        } catch (Throwable t) {
+            runOnUiThread(() -> status.setText("שגיאה בהפעלה:\n" + t));
         }
     }
 
-    private SharedPreferences prefs() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE);
+    private boolean healthy() {
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(BASE + "/api/health").openConnection();
+            c.setConnectTimeout(500);
+            c.setReadTimeout(1500);
+            return c.getResponseCode() == 200;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void copyAssets(String path, File destRoot) throws Exception {
+        String[] list = getAssets().list(path);
+        File out = new File(destRoot, path);
+        if (list != null && list.length > 0) {
+            out.mkdirs();
+            for (String n : list) copyAssets(path + "/" + n, destRoot);
+        } else {
+            out.getParentFile().mkdirs();
+            try (InputStream in = getAssets().open(path); OutputStream os = new FileOutputStream(out)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            }
+        }
+    }
+
+    private static void deleteTree(File f) {
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) deleteTree(k);
+        f.delete();
+    }
+
+    private static String readText(File f) throws Exception {
+        return new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8");
+    }
+
+    private static void writeText(File f, String s) throws Exception {
+        java.nio.file.Files.write(f.toPath(), s.getBytes("UTF-8"));
     }
 
     private WebView buildWebView() {
@@ -83,24 +132,16 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setGeolocationEnabled(true);
-        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setBuiltInZoomControls(false);
         w.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
-                Uri base = Uri.parse(prefs().getString(KEY_URL, ""));
-                if (u.getHost() != null && u.getHost().equals(base.getHost())) return false;
+                if ("127.0.0.1".equals(u.getHost())) return false;
                 try {
                     startActivity(new Intent(Intent.ACTION_VIEW, u));
                 } catch (Exception ignored) { }
                 return true;
-            }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
-                if (req.isForMainFrame()) showSetup(getString(R.string.setup_error));
             }
         });
         w.setWebChromeClient(new WebChromeClient() {
@@ -118,84 +159,17 @@ public class MainActivity extends Activity {
         return w;
     }
 
-    private View buildSetup() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackgroundColor(Color.WHITE);
-        box.setGravity(Gravity.CENTER);
-        box.setPadding(48, 48, 48, 48);
-        box.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-
-        TextView title = new TextView(this);
-        title.setText(R.string.setup_title);
-        title.setTextSize(24);
-        title.setTextColor(0xFF1E3A8A);
-        box.addView(title);
-
-        TextView help = new TextView(this);
-        help.setText(R.string.setup_help);
-        help.setPadding(0, 24, 0, 24);
-        box.addView(help);
-
-        input = new EditText(this);
-        input.setHint(R.string.setup_hint);
-        input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setImeOptions(EditorInfo.IME_ACTION_GO);
-        input.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
-        input.setOnEditorActionListener((v, action, e) -> { connect(); return true; });
-        box.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        error = new TextView(this);
-        error.setTextColor(0xFFB91C1C);
-        error.setPadding(0, 16, 0, 0);
-        box.addView(error);
-
-        Button go = new Button(this);
-        go.setText(R.string.setup_connect);
-        go.setOnClickListener(v -> connect());
-        box.addView(go);
-        return box;
-    }
-
-    private void showSetup(String message) {
-        input.setText(prefs().getString(KEY_URL, ""));
-        error.setText(message == null ? "" : message);
-        setup.setVisibility(View.VISIBLE);
-    }
-
-    private void connect() {
-        String url = input.getText().toString().trim();
-        if (url.isEmpty()) return;
-        if (!url.contains("://")) url = "http://" + url;
-        Uri u = Uri.parse(url);
-        if (u.getHost() == null || !(u.getScheme().equals("http") || u.getScheme().equals("https"))) {
-            error.setText(R.string.setup_bad_url);
-            return;
-        }
-        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-        prefs().edit().putString(KEY_URL, url).apply();
-        setup.setVisibility(View.GONE);
-        web.loadUrl(url + "/map.html");
-    }
-
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
         if (code == REQ_LOCATION && pendingGeo != null) {
-            boolean ok = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
-            pendingGeo.invoke(pendingGeoOrigin, ok, false);
+            pendingGeo.invoke(pendingGeoOrigin, results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED, false);
             pendingGeo = null;
         }
     }
 
     @Override
     public void onBackPressed() {
-        if (setup.getVisibility() == View.VISIBLE && web.getUrl() != null) {
-            setup.setVisibility(View.GONE);
-        } else if (web.canGoBack()) {
-            web.goBack();
-        } else {
-            super.onBackPressed();
-        }
+        if (web.canGoBack()) web.goBack();
+        else super.onBackPressed();
     }
 }

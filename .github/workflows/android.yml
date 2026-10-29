@@ -5,11 +5,11 @@ name: Android APK
 #   - version tag (v*.*.*)      : also attaches HebrewMaps-<v>.apk and HebrewMaps.apk to the GitHub Release
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/**"]
     tags: ["v*.*.*"]
-    paths: ["android/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "hmaps/**", "web/**", ".github/workflows/android.yml"]
   pull_request:
-    paths: ["android/**", ".github/workflows/android.yml"]
+    paths: ["android/**", "hmaps/**", "web/**", ".github/workflows/android.yml"]
   workflow_dispatch:
 
 jobs:
@@ -35,24 +35,12 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      # Stable key: set the repository secrets ANDROID_KEYSTORE_B64 (base64 of a .jks, alias "hebrewmaps")
-      # and ANDROID_KEYSTORE_PASSWORD so every APK installs as an update. Without them a one-off key is
-      # generated and the user must uninstall before installing a newer APK.
-      - name: Signing key
-        env:
-          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        run: |
-          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/hmaps.jks"
-          else
-            KS_PASS="$(openssl rand -hex 16)"
-            keytool -genkeypair -keystore "$RUNNER_TEMP/hmaps.jks" -storepass "$KS_PASS" -keypass "$KS_PASS" \
-              -alias hebrewmaps -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Hebrew Maps"
-          fi
-          echo "::add-mask::$KS_PASS"
-          echo "HMAPS_KEYSTORE=$RUNNER_TEMP/hmaps.jks" >> "$GITHUB_ENV"
-          echo "HMAPS_KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+      # web/vendor and web/fonts-ui are gitignored and fetched at build time
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Fetch web assets
+        run: python3 tools/fetch_assets.py
 
       - name: Build release APK
         working-directory: android
