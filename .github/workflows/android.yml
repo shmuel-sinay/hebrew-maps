@@ -40,7 +40,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch web assets
-        run: python3 tools/fetch_assets.py
+        run: |
+          pip install -r requirements.txt
+          python3 tools/fetch_assets.py
 
       - name: Build release APK
         working-directory: android
