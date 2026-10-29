@@ -10,20 +10,21 @@ val appCode = appVersion.split("-")[0].split(".").let {
 }
 
 // The Python server (hmaps/) and the web UI (web/) of the repository are packaged into the app.
-val pySrc = layout.buildDirectory.dir("py")
-val webSrc = layout.buildDirectory.dir("webassets")
-val copyServer by tasks.registering(Sync::class) {
+val pySrc = layout.buildDirectory.dir("py").get().asFile
+val webSrc = layout.buildDirectory.dir("webassets").get().asFile
+// copied while Gradle configures the project, so every later task (python + assets merge) sees the files
+delete(pySrc, webSrc)
+copy {
     from("../../hmaps") { into("hmaps") }
     from("src/main/python")
     exclude("**/__pycache__/**", "**/*.pyc")
     into(pySrc)
 }
-val copyWeb by tasks.registering(Sync::class) {
+copy {
     from("../../web") { into("web") }
     exclude("**/*.map")
     into(webSrc)
 }
-tasks.named("preBuild") { dependsOn(copyServer, copyWeb) }
 
 android {
     namespace = "il.hebrewmaps.android"
