@@ -16,7 +16,6 @@ val webSrc = layout.buildDirectory.dir("webassets").get().asFile
 delete(pySrc, webSrc)
 copy {
     from("../../hmaps") { into("hmaps") }
-    from("src/main/python")
     exclude("**/__pycache__/**", "**/*.pyc")
     into(pySrc)
 }
