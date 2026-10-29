@@ -4,7 +4,7 @@ plugins {
 }
 
 // CI passes the tag's version (v1.2.0 -> 1.2.0); locally it falls back to the default below.
-val appVersion = (System.getenv("HMAPS_VERSION") ?: "1.1.4").trim()
+val appVersion = (System.getenv("HMAPS_VERSION") ?: "1.1.3").trim()
 val appCode = appVersion.split("-")[0].split(".").let {
     (it.getOrNull(0)?.toIntOrNull() ?: 1) * 10000 + (it.getOrNull(1)?.toIntOrNull() ?: 0) * 100 + (it.getOrNull(2)?.toIntOrNull() ?: 0)
 }
@@ -40,19 +40,22 @@ android {
 
     sourceSets["main"].assets.srcDir(webSrc)
 
-    // Fixed project key so every release APK installs as an update over the previous one.
+    // Release key from the environment (CI secrets); without it the APK is signed with the local debug key.
     signingConfigs {
         create("release") {
-            storeFile = file("hebrewmaps-release.jks")
-            storePassword = "hebrewmaps"
-            keyAlias = "hebrewmaps"
-            keyPassword = "hebrewmaps"
+            val ks = System.getenv("HMAPS_KEYSTORE")
+            if (ks != null) {
+                storeFile = file(ks)
+                storePassword = System.getenv("HMAPS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("HMAPS_KEY_ALIAS") ?: "hebrewmaps"
+                keyPassword = System.getenv("HMAPS_KEYSTORE_PASSWORD")
+            }
         }
     }
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (System.getenv("HMAPS_KEYSTORE") != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
     compileOptions {

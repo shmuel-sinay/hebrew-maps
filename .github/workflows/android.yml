@@ -5,7 +5,7 @@ name: Android APK
 #   - version tag (v*.*.*)      : also attaches HebrewMaps-<v>.apk and HebrewMaps.apk to the GitHub Release
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main]
     tags: ["v*.*.*"]
     paths: ["android/**", "hmaps/**", "web/**", ".github/workflows/android.yml"]
   pull_request:
@@ -44,6 +44,24 @@ jobs:
           pip install -r requirements.txt
           python3 tools/fetch_assets.py
 
+      # Stable key: repository secrets ANDROID_KEYSTORE_B64 (base64 of a .jks, alias "hebrewmaps") and
+      # ANDROID_KEYSTORE_PASSWORD make every APK install as an update. Without them a one-off key is used.
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/hmaps.jks"
+          else
+            KS_PASS="$(openssl rand -hex 16)"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/hmaps.jks" -storepass "$KS_PASS" -keypass "$KS_PASS" \
+              -alias hebrewmaps -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Hebrew Maps"
+          fi
+          echo "::add-mask::$KS_PASS"
+          echo "HMAPS_KEYSTORE=$RUNNER_TEMP/hmaps.jks" >> "$GITHUB_ENV"
+          echo "HMAPS_KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+
       - name: Build release APK
         working-directory: android
         env:
@@ -60,22 +78,10 @@ jobs:
           name: HebrewMaps-apk-${{ steps.version.outputs.value }}
           path: HebrewMaps-*.apk
 
-      # A tag push (v*.*.*) or a commit whose message contains "[release]" publishes the APK.
-      - name: Publish the GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ steps.version.outputs.value }}
-          target_commitish: ${{ github.sha }}
-          name: "מפות ישראל v${{ steps.version.outputs.value }}"
-          body: |
-            ## אפליקציה לאנדרואיד / Android app
-
-            הורידו `HebrewMaps.apk`, התקינו (אישור התקנה ממקור לא ידוע), ופתחו: תפריט ← עדכונים ← עדכן הכול.
-            Download `HebrewMaps.apk`, install it, then open Menu → Updates → update all (map data is downloaded once).
-
-            דרישות: אנדרואיד 7 ומעלה, מעבד 64 ביט. Requires Android 7+ (64-bit).
-          make_latest: "true"
           files: |
             HebrewMaps-${{ steps.version.outputs.value }}.apk
             HebrewMaps.apk
