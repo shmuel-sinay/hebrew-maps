@@ -713,6 +713,9 @@ const app = {
       else if (act === 'print-map') this.printing.openMap();
       else if (act === 'hikes') openHikesNear(this);
       else if (act === 'recent') this._recentDialog();
+      else if (act === 'favs') this._favsDialog();
+      else if (act === 'record') this.toggleRecording();
+      else if (act === 'tracks') this._tracksDialog();
       else if (act === 'shortcuts') shortcutsDialog();
       else if (act === 'updates') openUpdates(this);
       else if (act === 'data') this._dataDialog();
@@ -733,6 +736,8 @@ const app = {
         case 'from': this.directions.open({ from: pt }); break;
         case 'to': this.directions.open({ to: pt }); break;
         case 'nearby': this._nearbyResults(lat, lon); break;
+        case 'fav': this.addFavorite(lat, lon); break;
+        case 'share': this._shareDialog(lat, lon); break;
         case 'copy': copyText(`${lat.toFixed(6)}, ${lon.toFixed(6)}`, 'הקואורדינטות הועתקו'); break;
       }
     });
@@ -876,6 +881,129 @@ const app = {
     b.querySelector('button').addEventListener('click', () => {
       b.hidden = true;
       store.set('bannerDismissed', msgs[0]);
+    });
+  },
+
+
+  // ------------------------------------------------------------------ favourites, sharing, track recording
+  favorites() {
+    return store.get('favs', []);
+  },
+
+  addFavorite(lat, lon) {
+    const list = this.favorites();
+    list.unshift({ id: `f${Date.now()}`, name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, lat, lon });
+    store.set('favs', list.slice(0, 200));
+    toast('המקום נשמר במועדפים');
+    this._favsDialog();
+  },
+
+  _favsDialog() {
+    const list = this.favorites();
+    openDialog('מועדפים', list.length
+      ? `<ul class="results">${list.map((f, i) => `<li class="result" style="display:flex;gap:6px;align-items:center">
+          <input type="text" value="${esc(f.name)}" data-name="${i}" aria-label="שם המקום" style="flex:1;min-width:0">
+          <button type="button" class="btn btn-secondary btn-sm" data-go="${i}">הצגה</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-to="${i}">ניווט</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-del="${i}" aria-label="מחיקה">✕</button></li>`).join('')}</ul>`
+      : '<p>אין מקומות שמורים. לחיצה ארוכה על המפה ← "שמירה במועדפים".</p>', (dlg) => {
+      dlg.querySelectorAll('[data-name]').forEach((inp) => inp.addEventListener('change', () => {
+        list[Number(inp.dataset.name)].name = inp.value.trim() || list[Number(inp.dataset.name)].name;
+        store.set('favs', list);
+      }));
+      dlg.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
+        const f = list[Number(b.dataset.go)];
+        closeDialog();
+        this.map.flyTo({ lat: f.lat, lon: f.lon }, 16);
+      }));
+      dlg.querySelectorAll('[data-to]').forEach((b) => b.addEventListener('click', () => {
+        const f = list[Number(b.dataset.to)];
+        closeDialog();
+        this.directions.open({ to: { lat: f.lat, lon: f.lon, name: f.name } });
+      }));
+      dlg.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+        list.splice(Number(b.dataset.del), 1);
+        store.set('favs', list);
+        this._favsDialog();
+      }));
+    });
+  },
+
+  /** Share text through the Android share sheet (app) or copy it (browser). */
+  shareText(title, text) {
+    if (window.HmapsAndroid?.shareText) window.HmapsAndroid.shareText(title, text);
+    else copyText(text, 'הועתק');
+  },
+
+  _shareDialog(lat, lon) {
+    const osm = `https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&mlon=${lon.toFixed(6)}#map=17/${lat.toFixed(6)}/${lon.toFixed(6)}`;
+    const geo = `geo:${lat.toFixed(6)},${lon.toFixed(6)}?q=${lat.toFixed(6)},${lon.toFixed(6)}`;
+    openDialog('שיתוף מיקום', `<p>${lat.toFixed(5)}, ${lon.toFixed(5)}</p>
+      <p><button type="button" class="btn btn-primary" data-share>שיתוף קישור</button></p>
+      <p><a class="btn btn-secondary" href="${geo}">פתיחה באפליקציית מפות אחרת (OsmAnd, Organic Maps…)</a></p>`, (dlg) => {
+      dlg.querySelector('[data-share]').addEventListener('click', () => this.shareText('מיקום', osm));
+    });
+  },
+
+  toggleRecording() {
+    const label = document.querySelector('[data-rec-label]');
+    if (this._rec) {
+      navigator.geolocation.clearWatch(this._rec.watch);
+      const pts = this._rec.pts;
+      this._rec = null;
+      if (label) label.textContent = 'הקלטת מסלול';
+      if (pts.length < 2) { toast('המסלול קצר מדי ולא נשמר'); return; }
+      const tracks = store.get('tracks', []);
+      tracks.unshift({ id: `t${Date.now()}`, name: new Date().toLocaleString('he-IL'), pts });
+      store.set('tracks', tracks.slice(0, 30));
+      toast(`המסלול נשמר (${pts.length} נקודות)`);
+      this._tracksDialog();
+      return;
+    }
+    if (!('geolocation' in navigator)) { toast('אין תמיכה בזיהוי מיקום', { kind: 'error' }); return; }
+    const rec = { pts: [] };
+    rec.watch = navigator.geolocation.watchPosition((pos) => {
+      const c = pos.coords;
+      const last = rec.pts[rec.pts.length - 1];
+      if (c.accuracy > 50) return;
+      if (last && Math.hypot((c.latitude - last[1]) * 111000, (c.longitude - last[0]) * 94000) < 5) return;
+      rec.pts.push([+c.longitude.toFixed(6), +c.latitude.toFixed(6), c.altitude == null ? null : Math.round(c.altitude), pos.timestamp]);
+      this.myLocation = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy };
+      this.map.setLocation(this.myLocation);
+    }, () => toast('אות המיקום אבד', { kind: 'error' }), { enableHighAccuracy: true, maximumAge: 2000 });
+    this._rec = rec;
+    if (label) label.textContent = 'עצירת הקלטה';
+    toast('הקלטת המסלול התחילה');
+  },
+
+  _gpx(t) {
+    const pts = t.pts.map((p) => `<trkpt lat="${p[1]}" lon="${p[0]}">${p[2] == null ? '' : `<ele>${p[2]}</ele>`}<time>${new Date(p[3]).toISOString()}</time></trkpt>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="מפות ישראל" xmlns="http://www.topografix.com/GPX/1/1"><trk><name>${esc(t.name)}</name><trkseg>${pts}</trkseg></trk></gpx>`;
+  },
+
+  _tracksDialog() {
+    const tracks = store.get('tracks', []);
+    openDialog('מסלולים שהוקלטו', tracks.length
+      ? `<ul class="results">${tracks.map((t, i) => `<li class="result" style="display:flex;gap:6px;align-items:center">
+          <span style="flex:1">${esc(t.name)} · ${t.pts.length} נק׳</span>
+          <button type="button" class="btn btn-secondary btn-sm" data-go="${i}">הצגה</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-gpx="${i}">שיתוף GPX</button>
+          <button type="button" class="btn btn-secondary btn-sm" data-del="${i}" aria-label="מחיקה">✕</button></li>`).join('')}</ul>`
+      : '<p>אין מסלולים. תפריט ← "הקלטת מסלול".</p>', (dlg) => {
+      dlg.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => {
+        const t = tracks[Number(b.dataset.go)];
+        closeDialog();
+        this.map.fitPoints?.(t.pts.map((p) => ({ lon: p[0], lat: p[1] })));
+      }));
+      dlg.querySelectorAll('[data-gpx]').forEach((b) => b.addEventListener('click', () => {
+        const t = tracks[Number(b.dataset.gpx)];
+        this.shareText(`${t.name}.gpx`, this._gpx(t));
+      }));
+      dlg.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
+        tracks.splice(Number(b.dataset.del), 1);
+        store.set('tracks', tracks);
+        this._tracksDialog();
+      }));
     });
   },
 
