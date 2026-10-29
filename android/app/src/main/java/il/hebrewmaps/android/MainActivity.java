@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.webkit.GeolocationPermissions;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -41,6 +42,8 @@ public class MainActivity extends Activity {
     private TextView status;
     private GeolocationPermissions.Callback pendingGeo;
     private String pendingGeoOrigin;
+    private ValueCallback<Uri[]> fileCallback;
+    private static final int REQ_FILE = 2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -145,6 +148,20 @@ public class MainActivity extends Activity {
             }
         });
         w.setWebChromeClient(new WebChromeClient() {
+            // "update from file": the update zip is picked with the system file picker
+            @Override
+            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = cb;
+                try {
+                    startActivityForResult(params.createIntent(), REQ_FILE);
+                } catch (Exception e) {
+                    fileCallback = null;
+                    return false;
+                }
+                return true;
+            }
+
             @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback cb) {
                 if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -157,6 +174,14 @@ public class MainActivity extends Activity {
             }
         });
         return w;
+    }
+
+    @Override
+    protected void onActivityResult(int code, int result, Intent data) {
+        if (code == REQ_FILE && fileCallback != null) {
+            fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
+            fileCallback = null;
+        }
     }
 
     @Override
