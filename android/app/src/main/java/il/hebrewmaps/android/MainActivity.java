@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -18,14 +19,7 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import com.chaquo.python.PyObject;
-import com.chaquo.python.Python;
-import com.chaquo.python.android.AndroidPlatform;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
@@ -44,6 +38,7 @@ public class MainActivity extends Activity {
     private String pendingGeoOrigin;
     private ValueCallback<Uri[]> fileCallback;
     private static final int REQ_FILE = 2;
+    private static final int REQ_NOTIFY = 3;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,34 +53,26 @@ public class MainActivity extends Activity {
         status.setBackgroundColor(0xFFFFFFFF);
         root.addView(status, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
+        }
+        startForegroundService(new Intent(this, ServerService.class));
         new Thread(this::boot, "hmaps-boot").start();
     }
 
     private void boot() {
-        try {
-            File webDir = new File(getFilesDir(), "web");
-            File stamp = new File(getFilesDir(), "web.version");
-            String ver = String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime);
-            if (!stamp.exists() || !ver.equals(readText(stamp))) {
-                deleteTree(webDir);
-                copyAssets("web", getFilesDir());
-                writeText(stamp, ver);
+        for (int i = 0; i < 240; i++) {
+            if (ServerService.error != null) {
+                runOnUiThread(() -> status.setText("שגיאה בהפעלה:\n" + ServerService.error));
+                return;
             }
-            if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
-            PyObject m = Python.getInstance().getModule("android_main");
-            m.callAttr("start", new File(getExternalFilesDir(null) != null ? getExternalFilesDir(null) : getFilesDir(), "data").getAbsolutePath(),
-                    webDir.getAbsolutePath(), PORT);
-            for (int i = 0; i < 120; i++) {
-                if (healthy()) {
-                    runOnUiThread(() -> { status.setVisibility(android.view.View.GONE); web.loadUrl(BASE + "/map.html"); });
-                    return;
-                }
-                Thread.sleep(500);
+            if (healthy()) {
+                runOnUiThread(() -> { status.setVisibility(android.view.View.GONE); web.loadUrl(BASE + "/map.html"); });
+                return;
             }
-            runOnUiThread(() -> status.setText("השרת לא עלה. נסו לפתוח את האפליקציה מחדש."));
-        } catch (Throwable t) {
-            runOnUiThread(() -> status.setText("שגיאה בהפעלה:\n" + t));
+            try { Thread.sleep(500); } catch (InterruptedException e) { return; }
         }
+        runOnUiThread(() -> status.setText("השרת לא עלה. נסו לפתוח את האפליקציה מחדש."));
     }
 
     private boolean healthy() {
@@ -97,36 +84,6 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    private void copyAssets(String path, File destRoot) throws Exception {
-        String[] list = getAssets().list(path);
-        File out = new File(destRoot, path);
-        if (list != null && list.length > 0) {
-            out.mkdirs();
-            for (String n : list) copyAssets(path + "/" + n, destRoot);
-        } else {
-            out.getParentFile().mkdirs();
-            try (InputStream in = getAssets().open(path); OutputStream os = new FileOutputStream(out)) {
-                byte[] buf = new byte[65536];
-                int n;
-                while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
-            }
-        }
-    }
-
-    private static void deleteTree(File f) {
-        File[] kids = f.listFiles();
-        if (kids != null) for (File k : kids) deleteTree(k);
-        f.delete();
-    }
-
-    private static String readText(File f) throws Exception {
-        return new String(java.nio.file.Files.readAllBytes(f.toPath()), "UTF-8");
-    }
-
-    private static void writeText(File f, String s) throws Exception {
-        java.nio.file.Files.write(f.toPath(), s.getBytes("UTF-8"));
     }
 
     private WebView buildWebView() {
@@ -186,6 +143,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == REQ_NOTIFY) return;
         if (code == REQ_LOCATION && pendingGeo != null) {
             pendingGeo.invoke(pendingGeoOrigin, results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED, false);
             pendingGeo = null;
