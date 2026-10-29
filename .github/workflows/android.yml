@@ -5,7 +5,7 @@ name: Android APK
 #   - version tag (v*.*.*)      : also attaches HebrewMaps-<v>.apk and HebrewMaps.apk to the GitHub Release
 on:
   push:
-    branches: [main]
+    branches: [main, "claude/upstream-android-pr"]
     tags: ["v*.*.*"]
     paths: ["android/**", "hmaps/**", "web/**", ".github/workflows/android.yml"]
   pull_request:
