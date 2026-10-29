@@ -7,6 +7,7 @@ import { openGuide } from './guide.js';
 import { maneuverIcon, svg } from './icons.js';
 import { head, wireHead } from './views.js';
 import { TransitPlanner } from './transit.js';
+import { Navigator } from './navigation.js';
 import { announce, esc, fmtDistance } from './util.js';
 
 const MODES = [
@@ -186,6 +187,7 @@ export class Directions {
                 </button></li>`).join('')}
             </ul>
             ${elevationSlot(this.app.meta, this.mode, r)}
+            ${this.mode !== 'transit' ? `<div class="p-section"><button type="button" class="btn btn-primary" data-act="navigate">התחלת ניווט קולי</button></div>` : ''}
             <div class="p-section"><button type="button" class="btn btn-secondary btn-sm" data-act="print-route">הדפסת מסלול והוראות</button></div>
             ${this.mode === 'foot' ? `<div class="p-section"><button type="button" class="btn btn-secondary btn-sm" data-act="guide">${svg('signpost', { size: 16 })}מדריך מסלול: שלבים, מים ובטיחות</button></div>` : ''}
             <h3 class="subtitle">הוראות הגעה</h3>
@@ -260,6 +262,10 @@ export class Directions {
       this._refresh();
     }));
     const r = this.routes[this.selected];
+    body.querySelector('[data-act="navigate"]')?.addEventListener('click', () => {
+      app.navigator ??= new Navigator(app, this);
+      app.navigator.start(r);
+    });
     body.querySelector('[data-act="print-route"]')?.addEventListener('click', () => app.printing.openDirections());
     if (r) fillElevation(body, app.meta, this.mode, r);
     body.querySelector('[data-act="guide"]')?.addEventListener('click', () => openGuide(app, {
