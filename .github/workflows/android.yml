@@ -1,0 +1,79 @@
+name: Android APK
+
+# Builds the Android app (android/) - a WebView shell for the Hebrew Maps server.
+#   - push/PR touching android/ : builds the APK and uploads it as a workflow artifact
+#   - version tag (v*.*.*)      : also attaches HebrewMaps-<v>.apk and HebrewMaps.apk to the GitHub Release
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/tags/v(.+)$ ]]; then v="${BASH_REMATCH[1]}"; else v="$(python3 tools/set_version.py)"; fi
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # Stable key: set the repository secrets ANDROID_KEYSTORE_B64 (base64 of a .jks, alias "hebrewmaps")
+      # and ANDROID_KEYSTORE_PASSWORD so every APK installs as an update. Without them a one-off key is
+      # generated and the user must uninstall before installing a newer APK.
+      - name: Signing key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/hmaps.jks"
+          else
+            KS_PASS="$(openssl rand -hex 16)"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/hmaps.jks" -storepass "$KS_PASS" -keypass "$KS_PASS" \
+              -alias hebrewmaps -keyalg RSA -keysize 2048 -validity 36500 -dname "CN=Hebrew Maps"
+          fi
+          echo "::add-mask::$KS_PASS"
+          echo "HMAPS_KEYSTORE=$RUNNER_TEMP/hmaps.jks" >> "$GITHUB_ENV"
+          echo "HMAPS_KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          HMAPS_VERSION: ${{ steps.version.outputs.value }}
+        run: gradle --no-daemon assembleRelease
+
+      - name: Name the APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk "HebrewMaps-${{ steps.version.outputs.value }}.apk"
+          cp "HebrewMaps-${{ steps.version.outputs.value }}.apk" HebrewMaps.apk
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: HebrewMaps-apk-${{ steps.version.outputs.value }}
+          path: HebrewMaps-*.apk
+
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            HebrewMaps-${{ steps.version.outputs.value }}.apk
+            HebrewMaps.apk

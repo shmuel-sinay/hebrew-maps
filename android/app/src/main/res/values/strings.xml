@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">מפות ישראל</string>
+    <string name="setup_title">חיבור לשרת המפות</string>
+    <string name="setup_help">הפעילו את מפות ישראל במחשב (באותה רשת Wi‑Fi) והזינו את כתובת המחשב, למשל http://192.168.1.20:8080 . אפשר גם כתובת של שרת מרוחק.</string>
+    <string name="setup_hint">http://192.168.1.20:8080</string>
+    <string name="setup_connect">התחברות</string>
+    <string name="setup_error">לא ניתן להתחבר לכתובת. בדקו שהשרת פועל ושהכתובת נכונה.</string>
+    <string name="setup_bad_url">כתובת לא תקינה</string>
+    <string name="settings">⚙</string>
+</resources>
