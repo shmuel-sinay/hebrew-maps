@@ -88,7 +88,9 @@ public class MainActivity extends Activity {
             HttpURLConnection c = (HttpURLConnection) new URL(BASE + "/api/health").openConnection();
             c.setConnectTimeout(500);
             c.setReadTimeout(1500);
-            return c.getResponseCode() == 200;
+            // 503 "degraded" = server is up but the map data is not downloaded yet; the UI then offers the update
+            c.getResponseCode();
+            return true;
         } catch (Exception e) {
             return false;
         }
