@@ -30,6 +30,9 @@ public class ServerService extends Service {
     private static final String CHANNEL = "server";
     /** Set when startup failed; shown by the activity. */
     static volatile String error;
+    /** Current startup step, shown on the loading screen. */
+    static volatile String stage = "מתחיל…";
+    static volatile PyObject module;
     private static boolean started;
     private PowerManager.WakeLock lock;
 
@@ -73,6 +76,7 @@ public class ServerService extends Service {
 
     private void boot() {
         try {
+            stage = "מכין קבצים (פעם ראשונה לוקח זמן)…";
             File webDir = new File(getFilesDir(), "web");
             File stamp = new File(getFilesDir(), "web.version");
             String ver = String.valueOf(getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime);
@@ -81,12 +85,17 @@ public class ServerService extends Service {
                 copyAssets("web");
                 writeText(stamp, ver);
             }
+            stage = "מפעיל את הפייתון…";
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
             PyObject m = Python.getInstance().getModule("android_main");
+            module = m;
+            stage = "טוען את השרת…";
             File ext = getExternalFilesDir(null);
             m.callAttr("start", new File(ext != null ? ext : getFilesDir(), "data").getAbsolutePath(), webDir.getAbsolutePath(), PORT);
+            stage = "ממתין לשרת…";
         } catch (Throwable t) {
-            error = String.valueOf(t);
+            error = android.util.Log.getStackTraceString(t);
+            android.util.Log.e("HebrewMaps", "startup failed", t);
         }
     }
 

@@ -62,18 +62,25 @@ public class MainActivity extends Activity {
     }
 
     private void boot() {
-        for (int i = 0; i < 240; i++) {
-            if (ServerService.error != null) {
-                runOnUiThread(() -> status.setText("שגיאה בהפעלה:\n" + ServerService.error));
+        for (int i = 0; i < 600; i++) {
+            String err = ServerService.error;
+            if (err == null && ServerService.module != null) {
+                try { String e = ServerService.module.callAttr("last_error").toString(); if (!e.isEmpty()) err = e; } catch (Throwable ignored) { }
+            }
+            if (err != null) {
+                final String shown = err.length() > 1500 ? err.substring(err.length() - 1500) : err;
+                runOnUiThread(() -> { status.setTextSize(12); status.setText("שגיאה בהפעלה (שלחו צילום מסך):\n\n" + shown); });
                 return;
             }
             if (healthy()) {
                 runOnUiThread(() -> { status.setVisibility(android.view.View.GONE); web.loadUrl(BASE + "/map.html"); });
                 return;
             }
+            final int sec = i / 2;
+            runOnUiThread(() -> status.setText("מפות ישראל נטענת…\n" + ServerService.stage + "\n" + sec + " שניות"));
             try { Thread.sleep(500); } catch (InterruptedException e) { return; }
         }
-        runOnUiThread(() -> status.setText("השרת לא עלה. נסו לפתוח את האפליקציה מחדש."));
+        runOnUiThread(() -> status.setText("השרת לא עלה אחרי חמש דקות.\nשלב אחרון: " + ServerService.stage));
     }
 
     private boolean healthy() {
