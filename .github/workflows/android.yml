@@ -74,6 +74,9 @@ jobs:
             הורידו `HebrewMaps.apk`, התקינו (אישור התקנה ממקור לא ידוע), ופתחו: תפריט ← עדכונים ← עדכן הכול.
             Download `HebrewMaps.apk`, install it, then open Menu → Updates → update all (map data is downloaded once).
 
+            **נתוני המפה / Map data:** הורידו גם `HebrewMaps-Update.zip` (כ-1.7GB, כל הארץ), פתחו אותו בטלפון עם "מפות ישראל" והוא יותקן אוטומטית.
+            Download `HebrewMaps-Update.zip` too (about 1.7 GB, all of Israel) and open it with the app to install the maps. Smaller per-topic files: `HebrewMaps-Update-maps.zip`, `-basemap.zip`, `-transit.zip`, `-zmanim.zip`.
+
             דרישות: אנדרואיד 7 ומעלה, מעבד 64 ביט. Requires Android 7+ (64-bit).
           make_latest: "true"
           files: |

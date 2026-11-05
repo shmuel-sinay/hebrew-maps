@@ -1,0 +1,53 @@
+name: Attach map data to the release
+
+# Copies the offline map-data update files (HebrewMaps-Update*.zip, built weekly by the upstream
+# project) onto this repository's app release, so the release page holds the APK and the maps.
+# Trigger: a push whose commit message contains "[data]", or a manual run from the default branch.
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the files to"
+        default: ""
+        required: false
+
+env:
+  # where the data files come from (the project that builds them weekly)
+  DATA_REPO: rishumit/hebrew-maps
+
+jobs:
+  attach:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[data]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          t="$INPUT_TAG"
+          [ -n "$t" ] || t="v$(python3 tools/set_version.py)"
+          echo "value=$t" >> "$GITHUB_OUTPUT"
+
+      - name: Download the data files
+        run: |
+          mkdir data-files
+          for f in HebrewMaps-Update.zip HebrewMaps-Update-maps.zip HebrewMaps-Update-basemap.zip HebrewMaps-Update-transit.zip HebrewMaps-Update-zmanim.zip; do
+            curl -fL --retry 5 --retry-delay 10 -o "data-files/$f" "https://github.com/$DATA_REPO/releases/download/data-latest/$f"
+          done
+          curl -fL --retry 5 -o data-files/data-manifest.json "https://github.com/$DATA_REPO/releases/download/data-latest/manifest.json"
+          ls -l data-files
+          for f in data-files/*.zip; do python3 -c "import sys,zipfile; zipfile.ZipFile(sys.argv[1]).testzip(); print('zip ok', sys.argv[1])" "$f"; done
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ steps.tag.outputs.value }}" >/dev/null
+          gh release upload "${{ steps.tag.outputs.value }}" data-files/* --clobber
